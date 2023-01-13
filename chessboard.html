@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="google" content="notranslate"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chessboard</title>
+    <link rel="stylesheet" href="./chessboard.css">
+    <style>
+        .button {
+            display: inline-block;
+            border: 1px solid black;
+        }
+    </style>
+
+    <script src="./jquery-3.6.1.min.js"></script>
+    <script src="./chess.js"></script>
+    <script src="./chessboard.js"></script>
+    <script>
+        const GAME_STATUS = {
+            Init : 0,
+            Playing : 1,
+        };
+
+        let side_selection;
+        let game_status = GAME_STATUS.Init;
+        let player_orientation;
+        let chess;
+        let board;
+        let board_elem;
+        let game_over;
+        let game_over_text;
+
+        function display_orientation_question() {
+            game_status == GAME_STATUS.Init;
+            side_selection.show();
+        }
+
+        function onDragStart(source, piece, position, orientation) {
+            // console.log(player_orientation + " and " + orientation);
+            if (game_status == GAME_STATUS.Init || orientation !== player_orientation
+            || ((orientation === 'white' && piece.search(/^w/) === -1) ||
+      (orientation === 'black' && piece.search(/^b/) === -1)))
+            {
+                return false;
+            }
+        }
+
+        function updateStatus() {
+            var status = ''
+
+            var moveColor = 'White'
+            if (chess.turn() === 'b') {
+                moveColor = 'Black'
+            }
+
+            if (chess.in_checkmate()) {
+                status = 'Game over, ' + moveColor + ' is in checkmate.';
+            }
+
+            else if (chess.in_draw()) {
+                status = 'Game over, drawn position';
+            }
+
+            if (status !== '') {
+                game_status = GAME_STATUS.Init;
+                game_over_text.text(status);
+                game_over.show();
+            }
+        }
+
+        function onDrop (source, target, piece, newPos, oldPos, orientation) {
+            // console.log("source: " + source + "\ttarget: "+target);
+            let r = chess.move({from: source, to:target, promotion: 'q'});
+            
+            if (r === null) {
+                return 'snapback';
+            } else {
+                updateStatus();
+                window.setTimeout(AI_move, 250);
+            }
+        }
+
+        function onSnapEnd () {
+            board.position(chess.fen());
+        }
+
+        function new_game(player_orientation) {
+            let config = {
+                draggable: true,
+                orientation: player_orientation,
+                position: 'start',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd
+            };
+            board = Chessboard('myBoard', config);
+            chess = new Chess();
+            
+            board_elem.show();
+            game_status = GAME_STATUS.Playing;
+            side_selection.hide();
+        }
+
+        function makeRandomMove() {
+            var possibleMoves = chess.moves();
+
+            // game over
+            if (possibleMoves.length === 0) return updateStatus();
+
+            let randomIdx = Math.floor(Math.random() * possibleMoves.length);
+            chess.move(possibleMoves[randomIdx]);
+            board.position(chess.fen());
+            updateStatus();
+        }
+
+        const piece_value = {
+            'p':10,     // pawn
+            'n':30,     // knight
+            'b':30,     // bishop
+            'r':50,     // rook
+            'q':90,     // queen
+            'k':900     // king
+        }
+
+        function minimax(cur_chess, max_deep = 1, dir = 1, get_moves = true) {
+            let cur_moves = cur_chess.moves();
+            let child_chess;
+            let max;
+            let max_moves = new Set();
+
+            if (cur_moves.length === 0) {
+                if (get_moves) {
+                    return {value: -dir * piece_value.k, moves: cur_moves};
+                } else {
+                    return {value: -dir * piece_value.k};
+                }
+            }
+
+            if (max_deep > 0) {
+                if (dir === 1) {
+                    max = -Infinity;
+                    for(let i = 0; i < cur_moves.length; i ++) {
+                        child_chess = new Chess(cur_chess.fen());
+                        let child_move = child_chess.move(cur_moves[i]);
+                        let eval = minimax(child_chess, max_deep -1, -dir, false);
+
+                        if (child_move.captured !== undefined) {
+                            eval.value += piece_value[child_move.captured];
+                            if (max < eval.value) {
+                                max = eval.value;
+                                if (get_moves) {
+                                    max_moves.clear();
+                                    max_moves.add(cur_moves[i]);
+                                }
+                            } else if (get_moves && eval.value == max) {
+                                max_moves.add(cur_moves[i]);
+                            }
+                        } else {
+                            if (max < eval.value) {
+                                max = eval.value;
+                                if (get_moves) {
+                                    max_moves.add(cur_moves[i]);
+                                }
+                            } else if (get_moves && max === eval.value) {
+                                max_moves.add(cur_moves[i]);
+                            }
+                        }
+                    }
+                } else {
+                    max = Infinity;
+
+                    for(let i = 0; i < cur_moves.length; i ++) {
+                        child_chess = new Chess(cur_chess.fen());
+                        let child_move = child_chess.move(cur_moves[i]);
+                        let eval = minimax(child_chess, max_deep -1, -dir, false);
+
+                        if (child_move.captured !== undefined) {
+                            eval.value -= piece_value[child_move.captured];
+                            if (max > eval.value) {
+                                max = eval.value;
+                                if (get_moves) {
+                                    max_moves.clear();
+                                    max_moves.add(cur_moves[i]);
+                                } else if (get_moves && max === eval.value) {
+                                    max_moves.add(cur_moves[i]);
+                                }
+                            }
+                        } else {
+                            if (max > eval.value) {
+                                max = eval.value;
+                                if (get_moves) {
+                                    max_moves.add(cur_moves[i]);
+                                }
+                            } else if (get_moves && max === eval.value) {
+                                max_moves.add(cur_moves[i]);
+                            }
+                        }
+                    }
+                }
+
+                if (get_moves) {
+                    return {value: max, moves: Array.from(max_moves)};
+                } else {
+                    return {value: max};
+                }
+
+            } else {
+                if (dir === 1) {
+                    max = -Infinity;
+                    for(let i = 0; i < cur_moves.length; i ++) {
+                        child_chess = new Chess(cur_chess.fen());
+                        let child_move = child_chess.move(cur_moves[i]);
+
+                        if (child_move.captured !== undefined) {
+                            if (max < piece_value[child_move.captured]) {
+                                max = piece_value[child_move.captured];
+                                if (get_moves) {
+                                    max_moves.clear();
+                                    max_moves.add(cur_moves[i]);
+                                }
+                            } else if (get_moves && max === piece_value[child_move.captured]) {
+                                max_moves.add(cur_moves[i]);
+                            }
+                        } else {
+                            if (max < 0) {
+                                max = 0;
+                                if (get_moves) {
+                                    max_moves.add(cur_moves[i]);
+                                }
+                            } else if (get_moves && max === 0) {
+                                max_moves.add(cur_moves[i]);
+                            }
+                        }
+                    }
+                } else {
+                    max = Infinity;
+
+                    for(let i = 0; i < cur_moves.length; i ++) {
+                        child_chess = new Chess(cur_chess.fen());
+                        let child_move = child_chess.move(cur_moves[i]);
+
+                        if (child_move.captured !== undefined) {
+                            if (max > -piece_value[child_move.captured]) {
+                                max = -piece_value[child_move.captured];
+                                if (get_moves) {
+                                    max_moves.clear();
+                                    max_moves.add(cur_moves[i]);
+                                }
+                            } else if (get_moves && max === -piece_value[child_move.captured]) {
+                                max_moves.add(cur_moves[i]);
+                            }
+                        } else {
+                            if (max > 0) {
+                                max = 0;
+                                if (get_moves) {
+                                    max_moves.add(cur_moves[i]);
+                                }
+                            } else if (get_moves && max === 0) {
+                                max_moves.add(cur_moves[i]);
+                            }
+                        }
+                    }
+                }
+
+                if (get_moves) {
+                    return {value: max, moves: Array.from(max_moves)};
+                } else {
+                    return {value: max};
+                }
+            }
+        }
+
+        function minimax_move(max_deep) {
+            var best_moves = minimax(chess, max_deep);
+            console.log(best_moves);
+            var possibleMoves = best_moves.moves;
+            // game over
+            if (possibleMoves.length === 0) return updateStatus();
+
+            let randomIdx = Math.floor(Math.random() * possibleMoves.length);
+            chess.move(possibleMoves[randomIdx]);
+            board.position(chess.fen());
+            updateStatus();
+        }
+
+        function AI_move() {
+            // console.log(minimax(chess, 1, 1));
+            minimax_move(2);
+            // makeRandomMove();
+        }
+
+        $(document).ready(function () {
+            side_selection = $("#side_selection");
+            board_elem = $("#myBoard");
+            board_elem.hide();
+            game_over = $("#game_over");
+            game_over.hide();
+            game_over_text = $("#game_over_text");
+
+            $("#white_btn").on("click", function() {
+                player_orientation = "white";
+                new_game(player_orientation);
+            });
+
+            $("#black_btn").on("click", function() {
+                player_orientation = "black";
+                new_game(player_orientation);
+                AI_move();
+            });
+
+            $("#new_game_btn").on("click", function() {
+                game_over.hide();
+                side_selection.show();
+            })
+
+        })
+    </script>
+</head>
+<body>
+    <div id="myBoard" style="width: 400px"></div>
+    <div id="side_selection">Which side you are going to play?
+        <div id="white_btn" class="button">White</div>
+        <div id="black_btn" class="button">Black</div>
+    </div>
+    <div id="game_over"><span id="game_over_text"></span><div id="new_game_btn" class="button">New Game</div></div>
+</body>
+</html>
